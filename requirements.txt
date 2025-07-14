@@ -1,0 +1,11 @@
+torch
+torchvision
+--extra-index-url https://download.pytorch.org/whl/cu126
+
+numpy
+Pillow
+scikit-image
+matplotlib
+tqdm
+gradio
+PyYAML

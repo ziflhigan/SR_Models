@@ -1,0 +1,118 @@
+# SR_Models Configuration File
+# Switch between models by changing model.name to "srcnn" or "srgan"
+
+model:
+  name: "srgan"  # Options: "srcnn" or "srgan"
+  device: "cuda"  # Options: "cuda" or "cpu"
+
+# Dataset Configuration
+dataset:
+  name: "DIV2K"
+  scale_factor: 4  # Upscaling factor: 2, 3, 4, 8
+  train_hr_dir: "DIV2K/DIV2K_train_HR"
+  train_lr_dir: "DIV2K/DIV2K_train_LR_bicubic/X4"
+  valid_hr_dir: "DIV2K/DIV2K_valid_HR"
+  valid_lr_dir: "DIV2K/DIV2K_valid_LR_bicubic/X4"
+
+  # Data preprocessing
+  hr_crop_size: 96  # Size of HR patches for training
+  augmentation:
+    horizontal_flip: true
+    vertical_flip: true
+    rotation: true  # 90-degree rotations
+
+  # Normalization
+  normalize: true
+  norm_type: "zero_one"  # Options: "zero_one" [0,1] or "minus_one_one" [-1,1]
+
+# Training Configuration
+training:
+  epochs: 100
+  batch_size: 16
+  num_workers: 4  # DataLoader workers
+
+  # Learning rate settings
+  learning_rate:
+    generator: 0.0001  # For SRGAN generator or SRCNN
+    discriminator: 0.0001  # For SRGAN discriminator only
+
+  # Learning rate scheduler
+  scheduler:
+    enabled: true
+    type: "step"  # Options: "step", "cosine", "plateau"
+    step_size: 30  # For step scheduler
+    gamma: 0.5  # For step scheduler
+
+  # Checkpointing
+  checkpoint:
+    save_interval: 10  # Save every N epochs
+    save_best: true  # Save best model based on validation metric
+    metric: "psnr"  # Metric to monitor for best model
+
+  # Early stopping
+  early_stopping:
+    enabled: false
+    patience: 20
+    min_delta: 0.001
+
+  # Mixed precision training
+  use_amp: false  # Automatic mixed precision
+
+# SRCNN-specific Configuration
+srcnn:
+  # Network architecture
+  num_channels: 3  # Input/output channels (3 for RGB)
+  f1: 64  # Number of filters in first layer
+  f2: 32  # Number of filters in second layer
+  kernel_sizes: [9, 1, 5]  # Kernel sizes for each layer
+
+  # Loss function
+  loss_type: "mse"  # Options: "mse" or "l1"
+
+# SRGAN-specific Configuration
+srgan:
+  # Generator architecture
+  generator:
+    num_channels: 3
+    num_features: 64
+    num_blocks: 16  # Number of residual blocks
+
+  # Discriminator architecture
+  discriminator:
+    num_channels: 3
+    num_features: 64
+
+  # Loss configuration
+  loss:
+    content_loss: "vgg"  # Options: "mse", "l1", or "vgg"
+    vgg_layer: "relu5_4"  # VGG feature layer for perceptual loss
+    content_weight: 1.0
+    adversarial_weight: 0.001
+
+  # Training strategy
+  pretrain_generator: true  # Pretrain with MSE before adversarial training
+  pretrain_epochs: 10
+
+# Validation Configuration
+validation:
+  interval: 1  # Validate every N epochs
+  save_images: true  # Save sample images during validation
+  num_samples: 5  # Number of sample images to save
+
+# Logging Configuration
+logging:
+  level: "INFO"  # Options: "DEBUG", "INFO", "WARNING", "ERROR"
+  console: true  # Log to console
+  file: true  # Log to file
+
+# Output Directories
+output:
+  checkpoint_dir: "checkpoints"
+  log_dir: "logs"
+  result_dir: "results"
+
+# Metrics to track
+metrics:
+  - "psnr"
+  - "ssim"
+  - "loss"
