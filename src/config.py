@@ -8,6 +8,10 @@ import yaml
 from typing import Dict, Any, Optional
 from pathlib import Path
 
+from src.utils import get_logger
+
+logger = get_logger()
+
 
 class Config:
     """Configuration class for SR models."""
@@ -88,6 +92,13 @@ class Config:
         kernel_sizes = self.get('srcnn.kernel_sizes')
         if len(kernel_sizes) != 3:
             raise ValueError("SRCNN must have exactly 3 kernel sizes")
+
+        # Add a warning if the second kernel size is not a common value
+        if kernel_sizes[1] not in [1, 5]:
+            logger.warning(
+                f"SRCNN's second kernel size is {kernel_sizes[1]}. "
+                f"The original paper uses 1 or 5. Results may differ."
+            )
 
     def _validate_srgan_config(self) -> None:
         """Validate SRGAN-specific configuration."""
@@ -212,6 +223,11 @@ class Config:
     def checkpoint_dir(self) -> str:
         """Get checkpoint directory for current model."""
         return os.path.join(self.get('output.checkpoint_dir'), self.model_name)
+
+    @property
+    def dict(self) -> Dict[str, Any]:
+        """Return the configuration as a dictionary."""
+        return self._config
 
 
 # Convenience function for quick config loading
