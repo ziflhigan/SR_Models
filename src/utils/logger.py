@@ -9,6 +9,7 @@ from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
+import colorama
 
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 
@@ -70,14 +71,24 @@ class SRLogger:
         class ColoredFormatter(logging.Formatter):
             """Custom formatter with colors."""
 
-            COLORS = {
-                'DEBUG': '\033[36m',  # Cyan
-                'INFO': '\033[32m',  # Green
-                'WARNING': '\033[33m',  # Yellow
-                'ERROR': '\033[31m',  # Red
-                'CRITICAL': '\033[35m',  # Magenta
-            }
-            RESET = '\033[0m'
+            if colorama:
+                COLORS = {
+                    'DEBUG': colorama.Fore.CYAN,
+                    'INFO': colorama.Fore.GREEN,
+                    'WARNING': colorama.Fore.YELLOW,
+                    'ERROR': colorama.Fore.RED,
+                    'CRITICAL': colorama.Fore.MAGENTA,
+                }
+                RESET = colorama.Style.RESET_ALL
+            else:
+                COLORS = {
+                    'DEBUG': '\\033[36m',  # Cyan
+                    'INFO': '\\033[32m',  # Green
+                    'WARNING': '\\033[33m',  # Yellow
+                    'ERROR': '\\033[31m',  # Red
+                    'CRITICAL': '\\033[35m',  # Magenta
+                }
+                RESET = '\\033[0m'
 
             def __init__(self, fmt, datefmt=None):
                 super().__init__(fmt, datefmt)
