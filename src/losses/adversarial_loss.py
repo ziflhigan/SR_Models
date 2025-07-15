@@ -2,9 +2,12 @@
 Adversarial loss functions for GAN training.
 """
 
+from typing import Dict, Optional, Tuple
+
 import torch
 import torch.nn as nn
-from typing import Dict, Any, Optional, Tuple
+
+from ..config import Config
 from ..utils import get_logger
 
 logger = get_logger()
@@ -303,7 +306,7 @@ class RelativisticAdversarialLoss(nn.Module):
 
 
 def create_adversarial_losses_from_config(
-        config: Dict[str, Any]
+        config: Config
 ) -> Tuple[Optional[GeneratorLoss], Optional[DiscriminatorLoss]]:
     """
     Create adversarial losses from configuration.
