@@ -1,12 +1,14 @@
 """
 SRGAN trainer implementation.
 """
+from pathlib import Path
 from typing import Dict
 
 import torch
 from tqdm import tqdm
 
 from .base_trainer import BaseTrainer
+from ..config import Config
 from ..losses.adversarial_loss import create_adversarial_losses_from_config
 from ..models.srgan_discriminator import create_srgan_discriminator_from_config
 from ..models.srgan_generator import create_srgan_generator_from_config
@@ -21,7 +23,7 @@ logger = get_logger()
 class SRGANTrainer(BaseTrainer):
     """Trainer class for SRGAN model."""
 
-    def __init__(self, config, train_loader, valid_loader=None):
+    def __init__(self, config: Config, train_loader, valid_loader=None):
         self.mse_loss = None
         self.d_loss_fn = None
         self.g_loss_fn = None
@@ -49,6 +51,8 @@ class SRGANTrainer(BaseTrainer):
 
     def build_loss_function(self):
         self.g_loss_fn, self.d_loss_fn = create_adversarial_losses_from_config(self.config)
+        self.g_loss_fn.to(self.device)
+        self.d_loss_fn.to(self.device)
         self.mse_loss = torch.nn.MSELoss()  # For pre-training
         return self.g_loss_fn
 
@@ -109,7 +113,13 @@ class SRGANTrainer(BaseTrainer):
                 'D_Acc': f"R: {d_loss_dict['d_real_accuracy']:.2f} F: {d_loss_dict['d_fake_accuracy']:.2f}"
             })
 
-        return {**g_metrics.metrics, **d_metrics.metrics}
+        avg_metrics = {}
+        for key in g_metrics.metrics:
+            avg_metrics[key] = g_metrics.get_average(key)
+        for key in d_metrics.metrics:
+            avg_metrics[key] = d_metrics.get_average(key)
+
+        return avg_metrics
 
     def validate_epoch(self) -> Dict[str, float]:
         self.generator.eval()
@@ -128,13 +138,22 @@ class SRGANTrainer(BaseTrainer):
         return {'psnr': metrics.get_average('psnr'), 'ssim': metrics.get_average('ssim')}
 
     def _save_checkpoint(self, filename: str):
-        # Override base method to save both models and optimizers
-        model_dir = self.checkpoint_dir / self.config.get('model.name')
         save_checkpoint(
-            path=model_dir / filename,
+            path=self.checkpoint_dir / filename,
             epoch=self.current_epoch,
             generator_state_dict=self.generator.state_dict(),
             discriminator_state_dict=self.discriminator.state_dict(),
             optimizer_g_state_dict=self.optimizer_g.state_dict(),
             optimizer_d_state_dict=self.optimizer_d.state_dict(),
         )
+
+    def resume_from_checkpoint(self, path: Path):
+        logger.info(f"Resuming SRGAN training from {path}")
+        checkpoint = torch.load(path, map_location=self.device)
+        self.generator.load_state_dict(checkpoint['generator_state_dict'])
+        self.discriminator.load_state_dict(checkpoint['discriminator_state_dict'])
+        self.optimizer_g.load_state_dict(checkpoint['optimizer_g_state_dict'])
+        self.optimizer_d.load_state_dict(checkpoint['optimizer_d_state_dict'])
+        self.current_epoch = checkpoint.get('epoch', 0)
+        self.best_metric = checkpoint.get('best_metric', float('-inf'))
+        logger.info(f"Successfully resumed from epoch {self.current_epoch}.")
