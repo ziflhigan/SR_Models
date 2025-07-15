@@ -5,6 +5,8 @@ SRCNN (Super-Resolution Convolutional Neural Network) implementation.
 import torch
 import torch.nn as nn
 from typing import Dict, Any, Optional, Tuple, cast
+
+from ..config import Config
 from ..utils import get_logger
 
 logger = get_logger()
@@ -24,7 +26,9 @@ class SRCNN(nn.Module):
             f1: int = 64,  # Number of filters in first layer
             f2: int = 32,  # Number of filters in second layer
             kernel_sizes: Optional[Tuple[int, int, int]] = None,
-            scale_factor: int = 4
+            scale_factor: int = 4,
+            init_type: str = "kaiming",
+            padding_mode: str = "same"
     ):
         """
         Initialize SRCNN model.
@@ -42,6 +46,10 @@ class SRCNN(nn.Module):
         self.f1 = f1
         self.f2 = f2
         self.scale_factor = scale_factor
+        self.init_type = init_type
+
+        self.padding_mode = padding_mode
+        self.border_crop_size = 0
 
         # Default kernel sizes: (9, 1, 5) as in original paper
         # Alternative: (9, 5, 5) for better performance
@@ -55,6 +63,22 @@ class SRCNN(nn.Module):
         logger.info(f"  - Architecture: {num_channels}-{f1}-{f2}-{num_channels}")
         logger.info(f"  - Kernel sizes: {kernel_sizes}")
         logger.info(f"  - Scale factor: {scale_factor}x")
+        logger.info(f"  - Padding mode: {padding_mode}")
+
+        # Define padding based on the mode
+        k1, k2, k3 = kernel_sizes
+        if padding_mode == 'same':
+            p1, p2, p3 = k1 // 2, k2 // 2, k3 // 2
+        elif padding_mode == 'valid':
+            p1, p2, p3 = 0, 0, 0
+            # Calculate the total border pixels removed by all conv layers
+            total_border = (k1 - 1) + (k2 - 1) + (k3 - 1)
+            # We need to crop half of this from each side (top, bottom, left, right)
+            self.border_crop_size = total_border // 2
+            logger.info(
+                f"  - Valid padding enabled. Labels will be cropped by {self.border_crop_size} pixels on each side.")
+        else:
+            raise ValueError(f"Invalid padding_mode: {padding_mode}. Choose 'same' or 'valid'.")
 
         # Layer 1: Patch extraction and representation
         # Extracts overlapping patches and represents them as feature vectors
@@ -62,7 +86,7 @@ class SRCNN(nn.Module):
             in_channels=num_channels,
             out_channels=f1,
             kernel_size=kernel_sizes[0],
-            padding=kernel_sizes[0] // 2  # 'same' padding
+            padding=p1
         )
 
         # Layer 2: Non-linear mapping
@@ -71,7 +95,7 @@ class SRCNN(nn.Module):
             in_channels=f1,
             out_channels=f2,
             kernel_size=kernel_sizes[1],
-            padding=kernel_sizes[1] // 2  # 'same' padding
+            padding=p2
         )
 
         # Layer 3: Reconstruction
@@ -80,7 +104,7 @@ class SRCNN(nn.Module):
             in_channels=f2,
             out_channels=num_channels,
             kernel_size=kernel_sizes[2],
-            padding=kernel_sizes[2] // 2  # 'same' padding
+            padding=p3
         )
 
         # Activation function
@@ -99,17 +123,21 @@ class SRCNN(nn.Module):
         self._log_layer_info()
 
     def _initialize_weights(self):
-        """Initialize network weights using Kaiming initialization."""
-        logger.debug("Initializing SRCNN weights...")
+        """Initialize network weights based on the specified init_type."""
+        logger.debug(f"Initializing SRCNN weights using '{self.init_type}' method...")
 
         for module in self.modules():
             if isinstance(module, nn.Conv2d):
-                # Kaiming initialization for ReLU activations
-                nn.init.kaiming_normal_(module.weight, mode='fan_out', nonlinearity='relu')
+                if self.init_type == 'kaiming':
+                    nn.init.kaiming_normal_(module.weight, mode='fan_out', nonlinearity='relu')
+                elif self.init_type == 'normal':
+                    # As per original paper: N(0, 0.001)
+                    nn.init.normal_(module.weight, mean=0.0, std=0.001)
+                else:
+                    raise ValueError(f"Unknown init_type: {self.init_type}")
+
                 if module.bias is not None:
                     nn.init.constant_(module.bias, 0)
-
-        logger.debug("Weight initialization completed")
 
     def _log_layer_info(self):
         """Log detailed information about each layer."""
@@ -138,10 +166,20 @@ class SRCNN(nn.Module):
         to target resolution using bicubic interpolation.
 
         Args:
-            x: Input tensor of shape (batch, channels, height, width)
+        x: Input tensor of shape (batch, channels, height, width). This
+           should be the low-resolution image already upscaled to the
+           target resolution using an interpolator like bicubic.
 
         Returns:
-            Super-resolved image tensor of same shape as input
+        Super-resolved image tensor of same shape as input.
+
+        Note on Padding:
+        This implementation uses 'same' padding to ensure the output
+        dimensions match the input dimensions. The original SRCNN paper
+        did not use padding, resulting in a smaller output that was
+        compared against a centrally cropped ground-truth label. This
+        design choice simplifies the pipeline at the cost of a minor
+        deviation from the original paper.
         """
         # Validate input
         if x.dim() != 4:
@@ -283,7 +321,7 @@ class SRCNN(nn.Module):
                 logger.warning(f"Layer {layer_name} not found in model")
 
 
-def create_srcnn_from_config(config: Dict[str, Any]) -> SRCNN:
+def create_srcnn_from_config(config: Config) -> SRCNN:
     """
     Create SRCNN model from configuration.
 
@@ -296,6 +334,8 @@ def create_srcnn_from_config(config: Dict[str, Any]) -> SRCNN:
     config.get('model', {})
     dataset_config = config.get('dataset', {})
     srcnn_config = config.get('srcnn', {})
+    init_type = srcnn_config.get('init_type', 'kaiming')
+    padding_mode = srcnn_config.get('padding_mode', 'same')
 
     logger.info("Creating SRCNN model from configuration...")
 
@@ -313,7 +353,9 @@ def create_srcnn_from_config(config: Dict[str, Any]) -> SRCNN:
         f1=f1,
         f2=f2,
         kernel_sizes=kernel_sizes,
-        scale_factor=scale_factor
+        scale_factor=scale_factor,
+        init_type=init_type,
+        padding_mode=padding_mode
     )
 
     logger.info("SRCNN model created successfully from configuration")
