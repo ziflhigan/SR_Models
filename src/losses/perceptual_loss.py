@@ -2,12 +2,13 @@
 Perceptual loss functions using VGG features.
 """
 
-from typing import List, Dict, Any, Optional
+from typing import List, Optional
 
 import torch
 import torch.nn as nn
-from torchvision import models
+from torchvision.models import vgg19, VGG19_Weights
 
+from ..config import Config
 from ..utils import get_logger
 
 logger = get_logger()
@@ -33,7 +34,7 @@ class VGGFeatureExtractor(nn.Module):
         super(VGGFeatureExtractor, self).__init__()
 
         # Load pre-trained VGG19
-        vgg = models.vgg19(pretrained=True)
+        vgg = vgg19(weights=VGG19_Weights.DEFAULT)
         self.requires_grad = requires_grad
 
         # Layer mapping
@@ -250,7 +251,7 @@ class MultiLayerPerceptualLoss(nn.Module):
         return self.weight * total_loss
 
 
-def create_perceptual_loss_from_config(config: Dict[str, Any]) -> Optional[PerceptualLoss]:
+def create_perceptual_loss_from_config(config: Config) -> Optional[PerceptualLoss]:
     """
     Create perceptual loss from configuration.
 
