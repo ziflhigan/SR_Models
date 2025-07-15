@@ -54,34 +54,48 @@ def calculate_psnr(pred: torch.Tensor, target: torch.Tensor, max_val: float = 1.
 
 def calculate_ssim(pred: torch.Tensor, target: torch.Tensor, max_val: float = 1.0) -> float:
     """
-    Calculate Structural Similarity Index (SSIM).
+    Calculate Structural Similarity Index (SSIM) for a batch of images.
     Uses scikit-image for a robust implementation.
     """
-    pred = pred.clamp(0, max_val)
-    target = target.clamp(0, max_val)
+    # Ensure tensors are on CPU and clamp values
+    pred = pred.cpu().clamp(0, max_val)
+    target = target.cpu().clamp(0, max_val)
 
-    # Convert tensors to numpy arrays (H, W, C) for scikit-image
-    pred_np = pred.squeeze(0).permute(1, 2, 0).cpu().numpy()
-    target_np = target.squeeze(0).permute(1, 2, 0).cpu().numpy()
+    # Handle batches by iterating and averaging
+    if pred.dim() == 4:
+        ssim_scores = []
+        for i in range(pred.shape[0]):
+            pred_img = pred[i]
+            target_img = target[i]
 
-    # Ensure multichannel is set correctly for color or grayscale
-    multichannel = pred_np.shape[2] > 1
+            # Permute from (C, H, W) to (H, W, C) for scikit-image
+            pred_np = pred_img.permute(1, 2, 0).detach().numpy()
+            target_np = target_img.permute(1, 2, 0).detach().numpy()
 
-    # For batch processing, iterate and average
-    if pred.dim() == 4 and pred.shape[0] > 1:
-        ssim_val = np.mean([
-            ssim_skimage(
-                pred.cpu().numpy()[i, 0],
-                target.cpu().numpy()[i, 0],
-                data_range=max_val
-            ) for i in range(pred.shape[0])
-        ])
-    else:  # single image
-        ssim_val = ssim_skimage(
+            multichannel = pred_np.shape[2] > 1
+
+            ssim_val = ssim_skimage(
+                target_np,
+                pred_np,
+                data_range=max_val,
+                channel_axis=2 if multichannel else -1
+            )
+            ssim_scores.append(ssim_val)
+
+        return float(np.mean(ssim_scores))
+
+    # Handle a single image (3D tensor)
+    elif pred.dim() == 3:
+        pred_np = pred.permute(1, 2, 0).detach().numpy()
+        target_np = target.permute(1, 2, 0).detach().numpy()
+
+        multichannel = pred_np.shape[2] > 1
+
+        return float(ssim_skimage(
             target_np,
             pred_np,
             data_range=max_val,
             channel_axis=2 if multichannel else -1
-        )
-
-    return float(ssim_val)
+        ))
+    else:
+        raise ValueError(f"Unsupported tensor dimension for SSIM: {pred.dim()}. Expected 3 or 4.")
