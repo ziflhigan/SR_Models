@@ -7,10 +7,12 @@ from pathlib import Path
 from typing import Tuple, Optional, Union, Dict, Any
 
 import torch
+import torch.nn as nn
 from PIL import Image
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 
+from ..config import Config
 from ..utils.logger import get_logger
 
 logger = get_logger()
@@ -119,13 +121,14 @@ class DIV2KDataset(Dataset):
 
         if self.normalize:
             if self.norm_type == "zero_one":
-                self.normalize_transform = transforms.Lambda(lambda x: x)
+                # transforms.ToTensor() already scales to [0, 1]
+                self.normalize_transform = nn.Identity()
             elif self.norm_type == "minus_one_one":
                 self.normalize_transform = transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
             else:
                 raise ValueError(f"Invalid norm_type: {self.norm_type}")
         else:
-            self.normalize_transform = transforms.Lambda(lambda x: x)
+            self.normalize_transform = nn.Identity()
         logger.debug(f"Normalization transform set to '{self.norm_type}'.")
 
     def _load_image_pair(self, file_stem: str) -> Tuple[Image.Image, Image.Image]:
@@ -162,7 +165,10 @@ class DIV2KDataset(Dataset):
         lr_crop_size = self.hr_crop_size // self.scale_factor
 
         if self.hr_crop_size > hr_width or self.hr_crop_size > hr_height:
-            return hr_image, lr_image
+            raise ValueError(
+                f"hr_crop_size ({self.hr_crop_size}) is larger than the image dimensions "
+                f"({hr_width}x{hr_height}). Please use a smaller crop size."
+            )
 
         max_x = hr_width - self.hr_crop_size
         max_y = hr_height - self.hr_crop_size
@@ -234,7 +240,7 @@ class DIV2KDataset(Dataset):
 
 
 def create_data_loaders(
-        config: Dict[str, Any],
+        config: Config,
         train_hr_dir: str,
         train_lr_dir: str,
         valid_hr_dir: Optional[str] = None,
@@ -281,7 +287,7 @@ def create_data_loaders(
         )
         valid_loader = DataLoader(
             valid_dataset,
-            batch_size=batch_size,
+            batch_size=1,
             shuffle=False,
             num_workers=num_workers,
             pin_memory=torch.cuda.is_available(),
