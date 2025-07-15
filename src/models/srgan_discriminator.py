@@ -8,6 +8,7 @@ import torch
 import torch.nn as nn
 
 from .blocks import ConvBNReLUBlock
+from ..config import Config
 from ..utils import get_logger
 
 logger = get_logger()
@@ -27,7 +28,6 @@ class SRGANDiscriminator(nn.Module):
             self,
             num_channels: int = 3,
             num_features: int = 64,
-            hr_crop_size: int = 96
     ):
         """
         Initialize SRGAN Discriminator.
@@ -35,19 +35,16 @@ class SRGANDiscriminator(nn.Module):
         Args:
             num_channels: Number of input image channels (e.g., 3 for RGB)
             num_features: Number of features in the first convolutional layer
-            hr_crop_size: The spatial size (height/width) of the input HR patches.
-                          Needed to calculate the input size of the classifier.
         """
         super(SRGANDiscriminator, self).__init__()
 
         self.num_channels = num_channels
         self.num_features = num_features
-        self.hr_crop_size = hr_crop_size
 
         logger.info("Initializing SRGAN Discriminator:")
         logger.info(f"  - Input channels: {num_channels}")
         logger.info(f"  - Initial features: {num_features}")
-        logger.info(f"  - Expected HR patch size: {hr_crop_size}x{hr_crop_size}")
+        logger.info("  - Using AdaptiveAvgPool2d for input size independence.")
 
         # Feature extractor: a sequence of convolutional blocks
         self.features = nn.Sequential(
@@ -81,19 +78,15 @@ class SRGANDiscriminator(nn.Module):
             # -> (batch, 512, 6, 6)
         )
 
-        # Calculate the size of the flattened features after the conv layers
-        # The image is down sampled 4 times by a factor of 2, so 2^4 = 16
-        final_feature_map_size = hr_crop_size // 16
-        classifier_input_features = (num_features * 8) * (final_feature_map_size ** 2)
-        logger.debug(f"Classifier input features: {classifier_input_features}")
-
-        # Classifier: dense layers to produce a single logit
+        # Use Adaptive Average Pooling to handle any input size.
+        # The output of self.features is (batch, 512, H/16, W/16).
+        # AdaptiveAvgPool2d(1) will reduce this to (batch, 512, 1, 1).
         self.classifier = nn.Sequential(
+            nn.AdaptiveAvgPool2d(1),
             nn.Flatten(),
-            nn.Linear(classifier_input_features, 1024),
+            nn.Linear(num_features * 8, 1024),
             nn.LeakyReLU(0.2, inplace=True),
             nn.Linear(1024, 1)
-            # No sigmoid here, as BCEWithLogitsLoss is more stable
         )
 
         # Initialize weights
@@ -143,13 +136,6 @@ class SRGANDiscriminator(nn.Module):
         if x.dim() != 4:
             raise ValueError(f"Expected 4D input tensor, got {x.dim()}D")
 
-        if x.size(2) != self.hr_crop_size or x.size(3) != self.hr_crop_size:
-            logger.warning(
-                f"Input size ({x.size(2)}x{x.size(3)}) does not match expected "
-                f"HR crop size ({self.hr_crop_size}x{self.hr_crop_size}). "
-                f"This may cause an error in the classifier's linear layer."
-            )
-
         features = self.features(x)
         logits = self.classifier(features)
         return logits
@@ -174,7 +160,7 @@ class SRGANDiscriminator(nn.Module):
         }
 
 
-def create_srgan_discriminator_from_config(config: Dict[str, Any]) -> SRGANDiscriminator:
+def create_srgan_discriminator_from_config(config: Config) -> SRGANDiscriminator:
     """
     Create SRGAN Discriminator from configuration.
 
@@ -193,13 +179,11 @@ def create_srgan_discriminator_from_config(config: Dict[str, Any]) -> SRGANDiscr
     # Extract parameters
     num_channels = discriminator_config.get('num_channels', 3)
     num_features = discriminator_config.get('num_features', 64)
-    hr_crop_size = dataset_config.get('hr_crop_size', 96)
 
     # Create model
     model = SRGANDiscriminator(
         num_channels=num_channels,
-        num_features=num_features,
-        hr_crop_size=hr_crop_size
+        num_features=num_features
     )
 
     logger.info("SRGAN Discriminator created successfully from configuration")
