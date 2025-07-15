@@ -7,6 +7,7 @@ import torch.nn as nn
 import math
 from typing import Dict, Any, Tuple, Optional
 from .blocks import ResidualBlock, PixelShuffleBlock, get_activation, initialize_weights
+from ..config import Config
 from ..utils import get_logger
 
 logger = get_logger()
@@ -337,7 +338,7 @@ class SRGANGenerator(nn.Module):
             param.requires_grad = True
 
 
-def create_srgan_generator_from_config(config: Dict[str, Any]) -> SRGANGenerator:
+def create_srgan_generator_from_config(config: Config) -> SRGANGenerator:
     """
     Create SRGAN Generator from configuration.
 
