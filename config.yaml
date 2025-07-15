@@ -30,6 +30,7 @@ training:
   epochs: 100
   batch_size: 16
   num_workers: 4  # DataLoader workers
+  reproducible: false # Set to true for strict reproducibility
 
   # Learning rate settings
   learning_rate:
@@ -51,12 +52,12 @@ training:
 
   # Early stopping
   early_stopping:
-    enabled: false
-    patience: 20
+    enabled: true
+    patience: 10
     min_delta: 0.001
 
   # Mixed precision training
-  use_amp: false  # Automatic mixed precision
+  use_amp: true  # Automatic mixed precision
 
 # SRCNN-specific Configuration
 srcnn:
@@ -68,6 +69,9 @@ srcnn:
 
   # Loss function
   loss_type: "mse"  # Options: "mse" or "l1"
+
+  init_type: "kaiming" # Options: "kaiming" or "normal"
+  padding_mode: "same"  # Options: "same" or "valid"
 
 # SRGAN-specific Configuration
 srgan:
