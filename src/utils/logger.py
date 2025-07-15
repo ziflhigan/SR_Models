@@ -4,6 +4,7 @@ Creates timestamped log files in separate info and error directories.
 """
 
 import logging
+import os
 import sys
 from contextlib import contextmanager
 from datetime import datetime
@@ -43,8 +44,11 @@ class SRLogger:
         self.logger = logging.getLogger(name)
         self.logger.setLevel(logging.DEBUG)  # Capture all levels
 
-        # Remove existing handlers to avoid duplicates
-        self.logger.handlers.clear()
+        # Skip re‑configuration if this process already did it
+        if getattr(self.logger, "_sr_configured", False):
+            return
+
+        self.logger._sr_configured = True
 
         # Create formatters
         self.detailed_formatter = logging.Formatter(
@@ -56,10 +60,13 @@ class SRLogger:
             datefmt='%Y-%m-%d %H:%M:%S'
         )
 
+        # File handlers only in the main process to avoid countless empty files
+        is_main = (os.getpid() == os.getppid()) or (os.getenv("PYTHON_MAIN_PROCESS", "1") == "1")
+
         # Setup handlers
         if self.console:
             self._setup_console_handler()
-        if self.file:
+        if self.file and is_main:
             self._setup_file_handlers()
 
     def _setup_console_handler(self):
@@ -120,7 +127,12 @@ class SRLogger:
 
     def _setup_file_handlers(self):
         """Setup separate file handlers for info and error logs."""
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        # Re‑use one timestamp for the whole run (all processes)
+        timestamp = os.environ.get("SR_LOG_TIMESTAMP")
+
+        if timestamp is None:
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            os.environ["SR_LOG_TIMESTAMP"] = timestamp
 
         # Create log directories
         info_dir = Path(self.log_dir) / 'info'
