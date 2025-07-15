@@ -1,7 +1,7 @@
 """
 SRCNN trainer implementation.
 """
-
+from pathlib import Path
 from typing import Dict
 import torch
 import torch.nn as nn
@@ -9,6 +9,7 @@ import torch.nn.functional as functional
 from tqdm import tqdm
 
 from .base_trainer import BaseTrainer
+from ..config import Config
 from ..losses.pixel_loss import create_pixel_loss_from_config
 from ..models.srcnn import create_srcnn_from_config
 from ..utils.logger import get_logger
@@ -21,9 +22,10 @@ logger = get_logger()
 class SRCNNTrainer(BaseTrainer):
     """Trainer class for SRCNN model."""
 
-    def __init__(self, config, train_loader, valid_loader=None):
+    def __init__(self, config: Config, train_loader, valid_loader=None):
         super().__init__(config, train_loader, valid_loader)
         self.scale_factor = config.get('dataset.scale_factor', 4)
+        self.padding_mode = self.config.get('srcnn.padding_mode', 'same')
 
     def build_model(self) -> nn.Module:
         return create_srcnn_from_config(self.config)
@@ -51,8 +53,14 @@ class SRCNNTrainer(BaseTrainer):
                 if is_train:
                     self.optimizer.zero_grad()
 
-                with torch.cuda.amp.autocast(enabled=self.use_amp):
+                with torch.amp.autocast('cuda', enabled=self.use_amp):
                     sr_images = self.model(lr_upsampled)
+                    # If using 'valid' padding, crop the HR target to match the SR output size
+                    if self.padding_mode == 'valid':
+                        crop_size = self.model.border_crop_size
+                        if crop_size > 0:
+                            hr_images = hr_images[..., crop_size:-crop_size, crop_size:-crop_size]
+
                     loss = self.loss_function(sr_images, hr_images)
 
                 if is_train:
@@ -84,3 +92,12 @@ class SRCNNTrainer(BaseTrainer):
         sr = self.model(functional.interpolate(lr.to(self.device), scale_factor=self.scale_factor, mode='bicubic'))
         save_sample_images(lr, sr, hr, self.current_epoch, self.config.get('output.result_dir'), 'srcnn')
         return results
+
+    def resume_from_checkpoint(self, path: Path):
+        logger.info(f"Resuming SRCNN training from {path}")
+        checkpoint = torch.load(path, map_location=self.device)
+        self.model.load_state_dict(checkpoint['model_state_dict'])
+        self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        self.current_epoch = checkpoint.get('epoch', 0)
+        self.best_metric = checkpoint.get('best_metric', float('-inf'))
+        logger.info(f"Successfully resumed from epoch {self.current_epoch}.")
