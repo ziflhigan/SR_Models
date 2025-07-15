@@ -2,11 +2,10 @@
 Pixel-wise loss functions for super-resolution.
 """
 
-from typing import Dict, Any
-
 import torch
 import torch.nn as nn
 
+from ..config import Config
 from ..utils import get_logger
 
 logger = get_logger()
@@ -96,7 +95,7 @@ class L1Loss(PixelLoss):
         )
 
 
-def create_pixel_loss_from_config(config: Dict[str, Any]) -> PixelLoss:
+def create_pixel_loss_from_config(config: Config) -> PixelLoss:
     """
     Create pixel loss from configuration.
 
