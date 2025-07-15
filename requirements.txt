@@ -6,6 +6,8 @@ numpy
 Pillow
 scikit-image
 matplotlib
+seaborn
 tqdm
 gradio
 PyYAML
+colorama
