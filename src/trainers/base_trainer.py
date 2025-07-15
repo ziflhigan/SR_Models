@@ -5,13 +5,14 @@ Abstract base trainer class for super-resolution models.
 import time
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Optional
 
 import torch
 import torch.nn as nn
 from torch.optim.lr_scheduler import StepLR, CosineAnnealingLR, ReduceLROnPlateau
 from torch.utils.data import DataLoader
 
+from ..config import Config
 from ..utils.checkpoint import save_checkpoint
 from ..utils.logger import get_logger
 from ..utils.metrics import MetricTracker
@@ -77,7 +78,7 @@ class BaseTrainer(ABC):
 
     def __init__(
             self,
-            config: Dict[str, Any],
+            config: Config,
             train_loader: DataLoader,
             valid_loader: Optional[DataLoader] = None
     ):
@@ -104,13 +105,13 @@ class BaseTrainer(ABC):
         self.model.to(self.device)
 
         # Checkpoint and validation config
-        self.checkpoint_dir = Path(config.get('output.checkpoint_dir'))
+        self.checkpoint_dir = Path(config.checkpoint_dir)
         self.valid_interval = config.get('validation.interval', 1)
         self.save_interval = config.get('training.checkpoint.save_interval', 10)
         self.metric_name = config.get('training.checkpoint.metric', 'psnr')
 
         if self.use_amp:
-            self.scaler = torch.cuda.amp.GradScaler()
+            self.scaler = torch.amp.GradScaler('cuda')
             logger.info("Using Automatic Mixed Precision (AMP).")
 
         logger.info(f"BaseTrainer initialized for model '{self.config.get('model.name')}' on device '{self.device}'.")
@@ -133,6 +134,11 @@ class BaseTrainer(ABC):
 
     @abstractmethod
     def validate_epoch(self) -> Dict[str, float]:
+        pass
+
+    @abstractmethod
+    def resume_from_checkpoint(self, path: Path):
+        """Load state from a checkpoint to resume training."""
         pass
 
     def train(self):
@@ -179,11 +185,11 @@ class BaseTrainer(ABC):
             logger.debug(f"StepLR scheduler: step_size={step_size}, gamma={gamma}")
 
         elif scheduler_type == 'cosine':
-            T_max = scheduler_config.get('T_max', self.epochs)
+            t_max = scheduler_config.get('T_max', self.epochs)
             scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-                self.optimizer, T_max=T_max
+                self.optimizer, T_max=t_max
             )
-            logger.debug(f"CosineAnnealingLR scheduler: T_max={T_max}")
+            logger.debug(f"CosineAnnealingLR scheduler: T_max={t_max}")
 
         elif scheduler_type == 'plateau':
             patience = scheduler_config.get('patience', 10)
@@ -229,10 +235,8 @@ class BaseTrainer(ABC):
             self._save_checkpoint(f"checkpoint_epoch_{epoch}.pth")
 
     def _save_checkpoint(self, filename: str):
-        # Default implementation for simple models like SRCNN
-        model_dir = self.checkpoint_dir / self.config.get('model.name')
         save_checkpoint(
-            path=model_dir / filename,
+            path=self.checkpoint_dir / filename,
             epoch=self.current_epoch,
             model_state_dict=self.model.state_dict(),
             optimizer_state_dict=self.optimizer.state_dict(),
