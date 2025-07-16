@@ -359,13 +359,15 @@ def create_srgan_generator_from_config(config: Config) -> SRGANGenerator:
     num_features = generator_config.get('num_features', 64)
     num_blocks = generator_config.get('num_blocks', 16)
     scale_factor = dataset_config.get('scale_factor', 4)
+    use_batch_norm = generator_config.get('use_batch_norm', True)
 
     # Create model
     model = SRGANGenerator(
         num_channels=num_channels,
         num_features=num_features,
         num_blocks=num_blocks,
-        scale_factor=scale_factor
+        scale_factor=scale_factor,
+        use_batch_norm=use_batch_norm
     )
 
     logger.info("SRGAN Generator created successfully from configuration")
