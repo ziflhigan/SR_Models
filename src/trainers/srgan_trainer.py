@@ -37,6 +37,7 @@ class SRGANTrainer(BaseTrainer):
         self.ratio_enabled = ratio_config.get('enabled', False)
         self.g_steps = ratio_config.get('generator_steps', 1)
         self.d_steps = ratio_config.get('discriminator_steps', 1)
+        self.clip_grad_config = config.get('training.gradient_clipping', {})
         if self.ratio_enabled:
             logger.info(
                 f"Using training ratio: G updates every {self.g_steps} steps, D updates every {self.d_steps} steps.")
@@ -134,6 +135,12 @@ class SRGANTrainer(BaseTrainer):
             sr = self.generator(lr)
             loss = self.mse_loss(sr, hr)
             loss.backward()
+
+            # Conditionally clip gradients
+            if self.clip_grad_config.get('enabled', False):
+                max_norm = self.clip_grad_config.get('max_norm', 1.0)
+                torch.nn.utils.clip_grad_norm_(self.generator.parameters(), max_norm=max_norm)
+
             self.optimizer_g.step()
 
             psnr = calculate_psnr(sr, hr)
@@ -175,6 +182,12 @@ class SRGANTrainer(BaseTrainer):
                 fake_pred_for_g = self.discriminator(sr_for_g)
                 g_loss, g_loss_dict = self.g_loss_fn(sr_for_g, hr, fake_pred_for_g)
                 g_loss.backward()
+
+                # Conditionally clip gradients for the generator
+                if self.clip_grad_config.get('enabled', False):
+                    max_norm = self.clip_grad_config.get('max_norm', 1.0)
+                    torch.nn.utils.clip_grad_norm_(self.generator.parameters(), max_norm=max_norm)
+
                 self.optimizer_g.step()
                 g_metrics.update(**g_loss_dict)
 
@@ -246,16 +259,36 @@ class SRGANTrainer(BaseTrainer):
 
     def update_scheduler(self):
         """
-        Overrides the base method to handle stage-specific scheduler updates.
+        Overrides the base method to handle stage-specific scheduler updates
         """
-        if self.is_pretraining:
-            # During pre-training, only step the generator's scheduler.
-            if self.schedulers:
-                # The generator's optimizer is self.optimizer_g. Let's find its scheduler.
-                # Note: self.optimizer is an alias for self.optimizer_g in the SRGAN trainer.
-                for scheduler in self.schedulers:
-                    if scheduler.optimizer is self.optimizer_g:
-                        scheduler.step()
-        else:
-            # During adversarial training, revert to the base behavior.
+        if not self.schedulers:
+            return
+
+        # During adversarial training, use the logic from the base trainer
+        if not self.is_pretraining:
             super().update_scheduler()
+            return
+
+        # During pre-training, handle schedulers specifically
+        for scheduler in self.schedulers:
+            # Check if the scheduler is ReduceLROnPlateau
+            if isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+                # It needs the validation metric to step
+                validation_metric_value = 0.0
+                # Find the most recent validation metric from the history list
+                for epoch_log in reversed(self.history):
+                    metric_key = f'valid_{self.metric_name}'
+                    if metric_key in epoch_log:
+                        validation_metric_value = epoch_log[metric_key]
+                        break  # Found the latest one
+
+                if validation_metric_value > 0:
+                    scheduler.step(validation_metric_value)
+                else:
+                    logger.warning(
+                        f"ReduceLROnPlateau scheduler did not step. "
+                        f"No validation metric '{self.metric_name}' found in history."
+                    )
+            else:
+                # For other schedulers like StepLR, just step normally
+                scheduler.step()
