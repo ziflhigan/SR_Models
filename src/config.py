@@ -74,7 +74,7 @@ class Config:
 
         # Validate scheduler type
         scheduler_type = self.get('training.scheduler.type')
-        if scheduler_type not in ['step', 'cosine', 'plateau']:
+        if scheduler_type not in ['step', 'cosine', 'plateau', 'two_stage']:
             raise ValueError(f"Invalid scheduler type: {scheduler_type}")
 
         # Model-specific validation
