@@ -1,6 +1,3 @@
-# SR_Models Configuration File
-# Switch between models by changing model.name to "srcnn" or "srgan"
-
 model:
   name: "srgan"  # Options: "srcnn" or "srgan"
   device: "cuda"  # Options: "cuda" or "cpu"
@@ -23,7 +20,7 @@ dataset:
 
   # Normalization
   normalize: true
-  norm_type: "zero_one"  # Options: "zero_one" [0,1] or "minus_one_one" [-1,1]
+  norm_type: "minus_one_one"  # Options: "zero_one" [0,1] or "minus_one_one" [-1,1]
 
 # Training Configuration
 training:
@@ -35,14 +32,20 @@ training:
   # Learning rate settings
   learning_rate:
     generator: 0.0001  # For SRGAN generator or SRCNN
-    discriminator: 0.0001  # For SRGAN discriminator only
+    discriminator: 0.00001  # For SRGAN discriminator only
 
   # Learning rate scheduler
   scheduler:
     enabled: true
-    type: "step"  # Options: "step", "cosine", "plateau"
-    step_size: 30  # For step scheduler
-    gamma: 0.5  # For step scheduler
+    type: "two_stage"  # Options: "step", "cosine", "plateau"
+
+    # Step scheduler
+    step_size: 50
+    gamma: 0.5
+
+    # two_stage scheduler
+    milestone: 25  # Epoch at which to decay the learning rate
+    decay_factor: 0.1 # Factor to multiply LR by (e.g., 1e-4 -> 1e-5 means 0.1)
 
   # Checkpointing
   checkpoint:
@@ -80,6 +83,7 @@ srgan:
     num_channels: 3
     num_features: 64
     num_blocks: 16  # Number of residual blocks
+    use_batch_norm: false
 
   # Discriminator architecture
   discriminator:
@@ -93,9 +97,23 @@ srgan:
     content_weight: 1.0
     adversarial_weight: 0.001
 
+    # for discriminator regularization
+    label_smoothing:
+      enabled: false
+      factor: 0.1 # Use labels [0.9, 1.0] for real and [0.0, 0.1] for fake
+
   # Training strategy
-  pretrain_generator: true  # Pretrain with MSE before adversarial training
-  pretrain_epochs: 10
+  pretrain:
+    enabled: true
+    epochs: 50              # Number of epochs for pre-training only
+    validation_interval: 10  # How often to validate during pre-training
+    checkpoint_interval: 10  # How often to save checkpoints during pre-training
+
+ # for GAN training balance
+  training_ratio:
+    enabled: true
+    generator_steps: 1      # Number of updates for G
+    discriminator_steps: 2  # Number of updates for D
 
 # Validation Configuration
 validation:
@@ -120,3 +138,9 @@ metrics:
   - "psnr"
   - "ssim"
   - "loss"
+
+visualization:
+  enabled: true
+  style: "seaborn-v0_8-darkgrid" # Style for plots (e.g., "ggplot", "seaborn-v0_8-whitegrid")
+  save_interim_plots: true     # Save plots whenever a new best model is found
+  image_format: "png"          # Format for saved plots ("png", "svg", "pdf")
