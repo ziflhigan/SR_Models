@@ -326,6 +326,7 @@ def create_adversarial_losses_from_config(
 
     srgan_config = config.get('srgan', {})
     loss_config = srgan_config.get('loss', {})
+    smoothing_config = loss_config.get('label_smoothing', {})
 
     logger.info("Creating adversarial losses from configuration...")
 
@@ -340,8 +341,9 @@ def create_adversarial_losses_from_config(
 
     # Create base adversarial loss
     adversarial_loss = AdversarialLoss(
-        loss_type='bce',  # Defaulting to BCE for standard GAN
-        label_smoothing=False  # Can be made configurable
+        loss_type='bce',
+        label_smoothing=smoothing_config.get('enabled', False),
+        smoothing_factor=smoothing_config.get('factor', 0.1)
     )
 
     # Loss weights
