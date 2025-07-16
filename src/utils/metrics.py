@@ -38,13 +38,17 @@ class MetricTracker:
         return 0.0
 
 
-def calculate_psnr(pred: torch.Tensor, target: torch.Tensor, max_val: float = 1.0) -> float:
+def calculate_psnr(pred: torch.Tensor,
+                   target: torch.Tensor,
+                   max_val: float = 255.0,
+                   norm_type: str = "minus_one_one") -> float:
     """
-    Calculate Peak Signal-to-Noise Ratio.
-    Assumes input tensors are in the range [0, max_val].
+    Calculate Peak Signal-to-Noise Ratio with configurable de-normalization.
     """
-    pred = pred.clamp(0, max_val)
-    target = target.clamp(0, max_val)
+    # De-normalize tensors to the [0, 255] range before calculation
+    pred = _de_normalize(pred, norm_type).clamp(0, max_val)
+    target = _de_normalize(target, norm_type).clamp(0, max_val)
+
     mse = torch.mean((pred - target) ** 2)
     if mse == 0:
         return float('inf')
@@ -52,14 +56,17 @@ def calculate_psnr(pred: torch.Tensor, target: torch.Tensor, max_val: float = 1.
     return psnr.item()
 
 
-def calculate_ssim(pred: torch.Tensor, target: torch.Tensor, max_val: float = 1.0) -> float:
+def calculate_ssim(pred: torch.Tensor,
+                   target: torch.Tensor,
+                   max_val: float = 255.0,
+                   norm_type: str = "minus_one_one") -> float:
     """
     Calculate Structural Similarity Index (SSIM) for a batch of images.
     Uses scikit-image for a robust implementation.
     """
-    # Ensure tensors are on CPU and clamp values
-    pred = pred.cpu().clamp(0, max_val)
-    target = target.cpu().clamp(0, max_val)
+    # De-normalize tensors to the [0, 255] range and move to CPU
+    pred = _de_normalize(pred.cpu(), norm_type).clamp(0, max_val)
+    target = _de_normalize(target.cpu(), norm_type).clamp(0, max_val)
 
     # Handle batches by iterating and averaging
     if pred.dim() == 4:
@@ -99,3 +106,15 @@ def calculate_ssim(pred: torch.Tensor, target: torch.Tensor, max_val: float = 1.
         ))
     else:
         raise ValueError(f"Unsupported tensor dimension for SSIM: {pred.dim()}. Expected 3 or 4.")
+
+
+def _de_normalize(tensor: torch.Tensor, norm_type: str) -> torch.Tensor:
+    """De-normalizes a tensor from a given range to [0, 255]."""
+    if norm_type == "minus_one_one":
+        # De-normalize from [-1, 1] to [0, 255]
+        return tensor.mul(127.5).add(127.5)
+    elif norm_type == "zero_one":
+        # De-normalize from [0, 1] to [0, 255]
+        return tensor.mul(255.0)
+    else:
+        raise ValueError(f"Unsupported normalization type: {norm_type}")
