@@ -14,7 +14,6 @@ from ..losses.pixel_loss import create_pixel_loss_from_config
 from ..models.srcnn import create_srcnn_from_config
 from ..utils.logger import get_logger
 from ..utils.metrics import calculate_psnr, calculate_ssim
-from ..utils.visualization import save_sample_images
 
 logger = get_logger()
 
@@ -36,6 +35,11 @@ class SRCNNTrainer(BaseTrainer):
 
     def build_loss_function(self):
         return create_pixel_loss_from_config(self.config)
+
+    def get_sr_image(self, lr_batch: torch.Tensor) -> torch.Tensor:
+        """Generate SR image for a given LR batch for SRCNN."""
+        lr_upsampled = functional.interpolate(lr_batch, scale_factor=self.scale_factor, mode='bicubic')
+        return self.model(lr_upsampled)
 
     def _run_epoch(self, data_loader, is_train: bool) -> Dict[str, float]:
         self.model.train() if is_train else self.model.eval()
@@ -86,12 +90,7 @@ class SRCNNTrainer(BaseTrainer):
         return self._run_epoch(self.train_loader, is_train=True)
 
     def validate_epoch(self) -> Dict[str, float]:
-        results = self._run_epoch(self.valid_loader, is_train=False)
-        # Add sample image saving during validation
-        lr, hr = next(iter(self.valid_loader))
-        sr = self.model(functional.interpolate(lr.to(self.device), scale_factor=self.scale_factor, mode='bicubic'))
-        save_sample_images(lr, sr, hr, self.current_epoch, self.config.get('output.result_dir'), 'srcnn')
-        return results
+        return self._run_epoch(self.valid_loader, is_train=False)
 
     def resume_from_checkpoint(self, path: Path):
         logger.info(f"Resuming SRCNN training from {path}")
