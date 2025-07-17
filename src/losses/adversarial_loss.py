@@ -71,18 +71,19 @@ class AdversarialLoss(nn.Module):
         Returns:
             Target tensor
         """
+        # First, create the base target tensor using a scalar fill value.
         if target_is_real:
-            target_label = self.target_real_label
+            target_tensor = torch.full_like(prediction, self.target_real_label)
             if self.label_smoothing:
-                # Smooth real labels: e.g., [0.9, 1.0] instead of 1.0
-                target_label -= self.smoothing_factor * torch.rand_like(prediction)
+                # Then, apply the smoothing operation to the new tensor.
+                target_tensor -= self.smoothing_factor * torch.rand_like(prediction)
         else:
-            target_label = self.target_fake_label
+            target_tensor = torch.full_like(prediction, self.target_fake_label)
             if self.label_smoothing:
-                # Smooth fake labels: e.g., [0.0, 0.1] instead of 0.0
-                target_label += self.smoothing_factor * torch.rand_like(prediction)
+                # Apply smoothing to the tensor of zeros.
+                target_tensor += self.smoothing_factor * torch.rand_like(prediction)
 
-        return torch.full_like(prediction, target_label)
+        return target_tensor
 
     def forward(
             self,
