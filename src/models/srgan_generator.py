@@ -32,6 +32,7 @@ class SRGANGenerator(nn.Module):
             num_blocks: int = 16,
             scale_factor: int = 4,
             use_batch_norm: bool = True,
+            final_activation: str = 'tanh',
             activation: str = 'prelu'
     ):
         """
@@ -111,6 +112,12 @@ class SRGANGenerator(nn.Module):
             num_features, num_channels,
             kernel_size=9, padding=4
         )
+
+        # Conditionally set the final activation
+        if final_activation == 'tanh':
+            self.final_activation = nn.Tanh()
+        else:
+            self.final_activation = nn.Identity()
 
         # Initialize weights
         self._initialize_weights()
@@ -222,6 +229,7 @@ class SRGANGenerator(nn.Module):
 
         # Final reconstruction
         output = self.final_conv(upsampled)
+        output = self.final_activation(output)
 
         # Validate output size
         expected_height = x.size(2) * self.scale_factor
@@ -351,6 +359,7 @@ def create_srgan_generator_from_config(config: Config) -> SRGANGenerator:
     dataset_config = config.get('dataset', {})
     srgan_config = config.get('srgan', {})
     generator_config = srgan_config.get('generator', {})
+    final_activation = generator_config.get('final_activation', 'tanh')
 
     logger.info("Creating SRGAN Generator from configuration...")
 
@@ -367,7 +376,8 @@ def create_srgan_generator_from_config(config: Config) -> SRGANGenerator:
         num_features=num_features,
         num_blocks=num_blocks,
         scale_factor=scale_factor,
-        use_batch_norm=use_batch_norm
+        use_batch_norm=use_batch_norm,
+        final_activation=final_activation
     )
 
     logger.info("SRGAN Generator created successfully from configuration")

@@ -44,12 +44,43 @@ class SRGANTrainer(BaseTrainer):
 
         super().__init__(config, train_loader, valid_loader)
 
+        self._load_pretrained_generator()
         self.mse_loss = nn.MSELoss()
         self.g_loss_fn, self.d_loss_fn = create_adversarial_losses_from_config(self.config)
         self.g_loss_fn.to(self.device)
         self.d_loss_fn.to(self.device)
 
         self.pretrain_config = self.config.get('srgan.pretrain', {})
+
+    def _load_pretrained_generator(self):
+        """Loads weights from a pre-trained generator checkpoint if specified in the config."""
+        generator_config = self.config.get('srgan.generator', {})
+        path_str = generator_config.get('pretrained_model_path')
+
+        # Proceed only if a path is provided
+        if not path_str:
+            logger.info("No pre-trained generator path specified. Starting from scratch.")
+            return
+
+        checkpoint_path = Path(path_str)
+        if not checkpoint_path.exists():
+            logger.warning(f"Pre-trained generator not found at '{checkpoint_path}'. Starting from scratch.")
+            return
+
+        logger.info(f"Loading pre-trained generator weights from: {checkpoint_path}")
+        try:
+            checkpoint = torch.load(checkpoint_path, map_location=self.device)
+
+            # The pre-train checkpoint saves the generator's state dict under 'model_state_dict'
+            if 'model_state_dict' in checkpoint:
+                self.generator.load_state_dict(checkpoint['model_state_dict'])
+                logger.info("Successfully loaded weights into the generator.")
+            else:
+                logger.warning(
+                    f"Checkpoint '{checkpoint_path}' does not contain 'model_state_dict'. Could not load weights.")
+
+        except Exception as e:
+            logger.error(f"Failed to load pre-trained generator from '{checkpoint_path}': {e}", exc_info=True)
 
     def build_model(self) -> torch.nn.Module:
         self.generator = create_srgan_generator_from_config(self.config)
@@ -143,8 +174,9 @@ class SRGANTrainer(BaseTrainer):
 
             self.optimizer_g.step()
 
-            psnr = calculate_psnr(sr, hr)
-            ssim = calculate_ssim(sr, hr)
+            hr_norm_type = self.config.get('dataset.normalization.hr_norm_type')
+            psnr = calculate_psnr(sr, hr, norm_type=hr_norm_type)
+            ssim = calculate_ssim(sr, hr, norm_type=hr_norm_type)
             metrics.update(loss=loss.item(), psnr=psnr, ssim=ssim)
             pbar.set_postfix({'Loss': f"{loss.item():.4f}", 'PSNR': f"{psnr:.2f}"})
 
@@ -209,7 +241,11 @@ class SRGANTrainer(BaseTrainer):
             for lr, hr in self.valid_loader:
                 lr, hr = lr.to(self.device), hr.to(self.device)
                 sr = self.generator(lr)
-                metrics.update(psnr=calculate_psnr(sr, hr), ssim=calculate_ssim(sr, hr))
+                hr_norm_type = self.config.get('dataset.normalization.hr_norm_type')
+                metrics.update(
+                    psnr=calculate_psnr(sr, hr, norm_type=hr_norm_type),
+                    ssim=calculate_ssim(sr, hr, norm_type=hr_norm_type)
+                )
         return {'psnr': metrics.get_average('psnr'), 'ssim': metrics.get_average('ssim')}
 
     def _save_checkpoint(self, filename: str):
@@ -259,36 +295,29 @@ class SRGANTrainer(BaseTrainer):
 
     def update_scheduler(self):
         """
-        Overrides the base method to handle stage-specific scheduler updates
+        Update learning rate schedulers.
+        For ReduceLROnPlateau, it uses the validation metric.
+        For others, it just steps.
         """
-        if not self.schedulers:
+        if not hasattr(self, 'schedulers') or not self.schedulers:
             return
 
-        # During adversarial training, use the logic from the base trainer
-        if not self.is_pretraining:
-            super().update_scheduler()
-            return
+        # Assumes schedulers are of the same type or a mix of step-like and plateau
+        is_plateau = any(isinstance(s, torch.optim.lr_scheduler.ReduceLROnPlateau) for s in self.schedulers)
 
-        # During pre-training, handle schedulers specifically
-        for scheduler in self.schedulers:
-            # Check if the scheduler is ReduceLROnPlateau
-            if isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
-                # It needs the validation metric to step
-                validation_metric_value = 0.0
-                # Find the most recent validation metric from the history list
-                for epoch_log in reversed(self.history):
-                    metric_key = f'valid_{self.metric_name}'
-                    if metric_key in epoch_log:
-                        validation_metric_value = epoch_log[metric_key]
-                        break  # Found the latest one
+        if is_plateau:
+            # Find the most recent validation metric from the history list
+            validation_metric_value = 0.0
+            for epoch_log in reversed(self.history):
+                if f'valid_{self.metric_name}' in epoch_log:
+                    validation_metric_value = epoch_log[f'valid_{self.metric_name}']
+                    break  # Found the latest one
 
-                if validation_metric_value > 0:
-                    scheduler.step(validation_metric_value)
-                else:
-                    logger.warning(
-                        f"ReduceLROnPlateau scheduler did not step. "
-                        f"No validation metric '{self.metric_name}' found in history."
-                    )
-            else:
-                # For other schedulers like StepLR, just step normally
+            if validation_metric_value > 0:  # Ensure we have a valid metric
+                for scheduler in self.schedulers:
+                    if isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+                        scheduler.step(validation_metric_value)
+        else:
+            # For all other schedulers (StepLR, MultiStepLR), step once per epoch
+            for scheduler in self.schedulers:
                 scheduler.step()

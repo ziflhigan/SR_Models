@@ -68,9 +68,19 @@ class Config:
                 raise ValueError(f"Dataset path does not exist: {path}")
 
         # Validate normalization type
-        norm_type = self.get('dataset.norm_type')
-        if norm_type not in ['zero_one', 'minus_one_one']:
-            raise ValueError(f"Invalid normalization type: {norm_type}")
+        norm_config = self.get('dataset.normalization', {})
+        if norm_config.get('enabled', True):
+            valid_norm_types = ['zero_one', 'minus_one_one']
+
+            # Validate LR normalization type
+            lr_norm_type = norm_config.get('lr_norm_type')
+            if lr_norm_type not in valid_norm_types:
+                raise ValueError(f"Invalid lr_norm_type: '{lr_norm_type}'. Must be one of {valid_norm_types}")
+
+            # Validate HR normalization type
+            hr_norm_type = norm_config.get('hr_norm_type')
+            if hr_norm_type not in valid_norm_types:
+                raise ValueError(f"Invalid hr_norm_type: '{hr_norm_type}'. Must be one of {valid_norm_types}")
 
         # Validate scheduler type
         scheduler_type = self.get('training.scheduler.type')

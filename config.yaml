@@ -12,39 +12,46 @@ dataset:
   valid_lr_dir: "DIV2K/DIV2K_valid_LR_bicubic/X4"
 
   # Data preprocessing
-  hr_crop_size: 96  # Size of HR patches for training
+  hr_crop_size: 256  # Size of HR patches for training
   augmentation:
     horizontal_flip: true
     vertical_flip: true
     rotation: true  # 90-degree rotations
 
   # Normalization
-  normalize: true
-  norm_type: "minus_one_one"  # Options: "zero_one" [0,1] or "minus_one_one" [-1,1]
+  normalization:
+    enabled: true
+    lr_norm_type: "zero_one"       # For LR images: [0, 1]
+    hr_norm_type: "minus_one_one"  # For HR images: [-1, 1]
 
 # Training Configuration
 training:
   epochs: 100
-  batch_size: 16
+  batch_size: 32
   num_workers: 4  # DataLoader workers
   reproducible: false # Set to true for strict reproducibility
 
   # Learning rate settings
   learning_rate:
-    generator: 0.0001  # For SRGAN generator or SRCNN
-    discriminator: 0.00001  # For SRGAN discriminator only
+    generator: 0.0002  # For SRGAN generator or SRCNN
+    discriminator: 0.00005  # For SRGAN discriminator only
 
   # Learning rate scheduler
   scheduler:
     enabled: true
-    type: "two_stage"  # Options: "step", "cosine", "plateau"
+    type: "plateau"  # Options: "step", "cosine", "plateau", "two_stage"
+
+    # Plateau scheduler settings
+    patience: 2      # How many epochs to wait for improvement
+    factor: 0.5       # Factor to reduce LR by (e.g., 1e-4 -> 5e-5)
+    min_lr: 0.000001  # Minimum learning rate
 
     # Step scheduler
     step_size: 50
     gamma: 0.5
 
     # two_stage scheduler
-    milestone: 25  # Epoch at which to decay the learning rate
+    milestone: 10  # Epoch at which to decay the learning rate
     decay_factor: 0.1 # Factor to multiply LR by (e.g., 1e-4 -> 1e-5 means 0.1)
 
   # Checkpointing
@@ -61,6 +68,10 @@ training:
 
   # Mixed precision training
   use_amp: true  # Automatic mixed precision
+
+  gradient_clipping:
+    enabled: true
+    max_norm: 1.0
 
 # SRCNN-specific Configuration
 srcnn:
@@ -83,7 +94,9 @@ srgan:
     num_channels: 3
     num_features: 64
     num_blocks: 16  # Number of residual blocks
+    final_activation: "none"  # Options: "tanh" or "none"
     use_batch_norm: false
+    pretrained_model_path: ""
 
   # Discriminator architecture
   discriminator:
@@ -99,13 +112,13 @@ srgan:
 
     # for discriminator regularization
     label_smoothing:
-      enabled: false
+      enabled: true
       factor: 0.1 # Use labels [0.9, 1.0] for real and [0.0, 0.1] for fake
 
   # Training strategy
   pretrain:
     enabled: true
-    epochs: 50              # Number of epochs for pre-training only
+    epochs: 30              # Number of epochs for pre-training only
     validation_interval: 10  # How often to validate during pre-training
     checkpoint_interval: 10  # How often to save checkpoints during pre-training
 
@@ -113,11 +126,11 @@ srgan:
   training_ratio:
     enabled: true
     generator_steps: 1      # Number of updates for G
-    discriminator_steps: 2  # Number of updates for D
+    discriminator_steps: 5  # Number of updates for D
 
 # Validation Configuration
 validation:
-  interval: 1  # Validate every N epochs
+  interval: 10  # Validate every N epochs
   save_images: true  # Save sample images during validation
   num_samples: 5  # Number of sample images to save
 
@@ -144,3 +157,10 @@ visualization:
   style: "seaborn-v0_8-darkgrid" # Style for plots (e.g., "ggplot", "seaborn-v0_8-whitegrid")
   save_interim_plots: true     # Save plots whenever a new best model is found
   image_format: "png"          # Format for saved plots ("png", "svg", "pdf")
+
+
+evaluation:
+  checkpoint_path: "checkpoints/srgan/checkpoint_epoch_20.pth"
+  output_dir: "evaluation"
+  num_comparison_images: 10
+  batch_size: 1

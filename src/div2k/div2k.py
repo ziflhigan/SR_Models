@@ -33,8 +33,7 @@ class DIV2KDataset(Dataset):
             scale_factor: int = 4,
             hr_crop_size: Optional[int] = None,
             augmentation: Optional[Dict[str, bool]] = None,
-            normalize: bool = True,
-            norm_type: str = "zero_one",
+            normalization_config: Optional[Dict[str, any]] = None,
             mode: str = "train"
     ):
         """
@@ -46,8 +45,7 @@ class DIV2KDataset(Dataset):
             scale_factor: Up-scaling factor (2, 3, 4, or 8)
             hr_crop_size: Size of HR patches to crop (None for full images)
             augmentation: Dictionary of augmentation options
-            normalize: Whether to normalize images
-            norm_type: Normalization type ("zero_one" or "minus_one_one")
+            normalization_config: Normalization configurations for both HR and LR images
             mode: Dataset mode ("train", "val", or "test")
         """
         self.hr_dir = Path(hr_dir)
@@ -55,8 +53,7 @@ class DIV2KDataset(Dataset):
         self.scale_factor = scale_factor
         self.hr_crop_size = hr_crop_size
         self.mode = mode
-        self.normalize = normalize
-        self.norm_type = norm_type
+        self.norm_config = normalization_config or {'enabled': False}
 
         # Log dataset initialization
         logger.info(f"Initializing DIV2KDataset for '{self.mode}' mode.")
@@ -116,20 +113,28 @@ class DIV2KDataset(Dataset):
         return sorted(list(common_files))
 
     def _setup_transforms(self):
-        """Set up image transforms."""
+        """Set up image transforms based on the normalization config."""
         self.to_tensor = transforms.ToTensor()
 
-        if self.normalize:
-            if self.norm_type == "zero_one":
-                # transforms.ToTensor() already scales to [0, 1]
-                self.normalize_transform = nn.Identity()
-            elif self.norm_type == "minus_one_one":
-                self.normalize_transform = transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
-            else:
-                raise ValueError(f"Invalid norm_type: {self.norm_type}")
+        def get_transform(norm_type):
+            if norm_type == "minus_one_one":
+                return transforms.Compose([
+                    transforms.ToTensor(),
+                    transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
+                ])
+            # Default to [0, 1] range
+            return transforms.ToTensor()
+
+        if self.norm_config.get('enabled', False):
+            lr_norm_type = self.norm_config.get('lr_norm_type', 'zero_one')
+            hr_norm_type = self.norm_config.get('hr_norm_type', 'minus_one_one')
+            self.lr_transform = get_transform(lr_norm_type)
+            self.hr_transform = get_transform(hr_norm_type)
+            logger.debug(f"Transforms set up: LR norm='{lr_norm_type}', HR norm='{hr_norm_type}'.")
         else:
-            self.normalize_transform = nn.Identity()
-        logger.debug(f"Normalization transform set to '{self.norm_type}'.")
+            self.lr_transform = self.to_tensor
+            self.hr_transform = self.to_tensor
+            logger.debug("Normalization is disabled.")
 
     def _load_image_pair(self, file_stem: str) -> Tuple[Image.Image, Image.Image]:
         """Load HR and LR image pair."""
@@ -219,10 +224,8 @@ class DIV2KDataset(Dataset):
             hr_image, lr_image = self._random_crop(hr_image, lr_image)
 
         hr_image, lr_image = self._apply_augmentation(hr_image, lr_image)
-        hr_tensor = self.to_tensor(hr_image)
-        lr_tensor = self.to_tensor(lr_image)
-        hr_tensor = self.normalize_transform(hr_tensor)
-        lr_tensor = self.normalize_transform(lr_tensor)
+        hr_tensor = self.hr_transform(hr_image)
+        lr_tensor = self.lr_transform(lr_image)
 
         return lr_tensor, hr_tensor
 
@@ -250,6 +253,10 @@ def create_data_loaders(
     logger.info("Creating data loaders...")
     dataset_config = config.get('dataset', {})
     training_config = config.get('training', {})
+
+    # Extract the entire normalization dictionary from the config
+    normalization_config = dataset_config.get('normalization', {})
+
     batch_size = training_config.get('batch_size', 16)
     num_workers = training_config.get('num_workers', 4)
 
@@ -259,8 +266,7 @@ def create_data_loaders(
         scale_factor=dataset_config.get('scale_factor', 4),
         hr_crop_size=dataset_config.get('hr_crop_size', 96),
         augmentation=dataset_config.get('augmentation', {}),
-        normalize=dataset_config.get('normalize', True),
-        norm_type=dataset_config.get('norm_type', 'zero_one'),
+        normalization_config=normalization_config,
         mode='train'
     )
 
@@ -281,13 +287,12 @@ def create_data_loaders(
             scale_factor=dataset_config.get('scale_factor', 4),
             hr_crop_size=None,
             augmentation={},
-            normalize=dataset_config.get('normalize', True),
-            norm_type=dataset_config.get('norm_type', 'zero_one'),
+            normalization_config=normalization_config,
             mode='val'
         )
         valid_loader = DataLoader(
             valid_dataset,
-            batch_size=1,
+            batch_size=1,  # Typically 1 for validation
             shuffle=False,
             num_workers=num_workers,
             pin_memory=torch.cuda.is_available(),
